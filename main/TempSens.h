@@ -13,7 +13,7 @@ class TempSens
         float read();
         float value;
         uint32_t minTimeBetweenSignal;
-        float minTempGapBetweenSigna;
+        float minTempGapBetweenSignal;
         TempSens(ds18b20*,DeviceAddress*);
 
 };

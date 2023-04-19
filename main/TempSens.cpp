@@ -1,4 +1,5 @@
 #include "TempSens.h"
+#include "millis.h"
 
 bool TempSens::mustSignal()
 {
@@ -8,9 +9,10 @@ bool TempSens::mustSignal()
 float TempSens::read()
 {
     value=bus->getTempC(&address);
-    if(abs(value-lastSignaledValue))>minTempGapBetweenSigna) _mustsignal=true;
+
+    if(abs(value-lastSignaledValue)>minTempGapBetweenSignal) _mustsignal=true;
     else
-    if((lastSignaledTime-now)>minTimeBetweenSignal) _mustsignal=true;
+    if((lastSignaledTime-millis())>minTimeBetweenSignal) _mustsignal=true;
     return value;
 }
 
@@ -18,7 +20,7 @@ void TempSens::Signaled()
 {
 
     lastSignaledValue=value;
-    lastSignaledTime=now;
+    lastSignaledTime=millis();
     _mustsignal=false;
 }
 
