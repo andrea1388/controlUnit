@@ -16,6 +16,8 @@ void app_main(void)
     ds18b20 a((gpio_num_t)PIN);
     TempSens* s[2];
     int count=a.search_all(address);
+    printf("sens found: %d\n",count);
+    if(count>2) return;
     for(int i=0;i<count;i++)
     {
         s[i]=new TempSens(&a,&address[i]);
