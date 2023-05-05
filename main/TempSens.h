@@ -13,7 +13,7 @@ class TempSens
         float read();
         float value;
         uint32_t minTimeBetweenSignal=1000;
-        float minTempGapBetweenSignal=1.0;
+        uint8_t minTempGapBetweenSignal=1;
         //TempSens(ds18b20*,DeviceAddress*);
         TempSens(ds18b20*,const char*);
         bool setResolution(uint8_t);
