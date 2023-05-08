@@ -1,5 +1,8 @@
-#include <Arduino.h>
+#include "esp_log.h"
 #include "Proto485.h"
+#include "millis.h"
+#include "soc/uart_reg.h"
+#include "soc/soc.h"
 //#define DEBUG485
 #define LMAXPKT 20
 #define A 0
@@ -7,21 +10,34 @@
 #define D 2
 #define C 3
 #define S 4
-Proto485::Proto485(Stream *stream, int txenablepin, bool testreg) {
-    _txenablepin=txenablepin;
-    _stream=stream;
-    _testreg=testreg;
+static const char *TAG = "Proto485";
+
+Proto485::Proto485(uart_port_t _uart_num, int tx_io_num, int rx_io_num, int rts_io_num, int cts_io_num) 
+{
+  uart_num=_uart_num;
+  uart_config_t uart_config = {
+  .baud_rate = 9600,
+  .data_bits = UART_DATA_8_BITS,
+  .parity = UART_PARITY_DISABLE,
+  .stop_bits = UART_STOP_BITS_1,
+  .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+  .rx_flow_ctrl_thresh = 122,
+  .source_clk = UART_SCLK_DEFAULT
+  };
+  REG_SET_BIT(UART_CONF1_REG(uart_num),UART_RS485TX_RX_EN);
+
+
+  // Configure UART parameters
+  ESP_ERROR_CHECK(uart_driver_install(uart_num,127*2 , 0, 0, NULL, 0));
+  ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_config));
+  ESP_ERROR_CHECK(uart_set_pin(uart_num, tx_io_num, rx_io_num, rts_io_num, cts_io_num));
+  ESP_ERROR_CHECK(uart_set_mode(uart_num, UART_MODE_RS485_HALF_DUPLEX));
 }
 
 void Proto485::ProcessaDatiSeriali(unsigned char c) {
   static byte numerobytesricevuti=0,bytesricevuti[LMAXPKT],prossimodato=A,lunghezza,comando,sum;
   static unsigned long tultimodatoricevuto;
-  #ifdef DEBUG485
-  Serial.print("c=");
-  Serial.print(c,HEX);
-  Serial.print(" prox=");
-  Serial.println(prossimodato);
-  #endif
+  ESP_LOGD(TAG, "c=%02x prox=%02x",c,prossimodato);
   if(millis()-tultimodatoricevuto > 300) {prossimodato=A; };
   tultimodatoricevuto=millis();
   if(prossimodato==A && c=='A') {prossimodato=C; numerobytesricevuti=0; return;}
@@ -34,22 +50,12 @@ void Proto485::ProcessaDatiSeriali(unsigned char c) {
     if(lunghezza==0) {
       prossimodato=S;
     }
-    #ifdef DEBUG485
-    Serial.print("next D");
-    Serial.print(" l=");
-    Serial.println(lunghezza);
-    #endif
+    ESP_LOGD(TAG, "next D l=%d",lunghezza);
     return;
   }
   if(prossimodato==D) {
     sum+=c;
     bytesricevuti[numerobytesricevuti++]=c;
-    #ifdef DEBUG485
-    Serial.print("DD l=");
-    Serial.print(lunghezza);
-    Serial.print(" br=");
-    Serial.println(numerobytesricevuti);
-    #endif
     if(numerobytesricevuti==lunghezza) prossimodato=S;
     return;
   }
@@ -57,43 +63,37 @@ void Proto485::ProcessaDatiSeriali(unsigned char c) {
     if(c==sum) {
       if (cbElaboraComando) this->cbElaboraComando(comando,bytesricevuti,lunghezza);
       prossimodato=A;
-      #ifdef DEBUG485
-      Serial.print("next A");
-      #endif
     } else {
-      #ifdef DEBUG485
-      Serial.print("somma errata");
-      #endif
+      ESP_LOGE(TAG, "wrong checksum");
     }
   }
 }
 
-void Proto485::Tx(char cmd, byte len, const char* b) {
+void Proto485::Tx(char cmd, byte len, const char* b) 
+{
     byte sum=(byte)cmd+len;
-    //for(byte r=0;r<len;r++) sum+=b[r];
-    digitalWrite(_txenablepin, HIGH);
-    _stream->write('A');
-    _stream->write(cmd);
-    _stream->write(len);
-    for (byte f=0;f<len;f++) {
-      _stream->write(b[f]);
-      sum+=b[f];
-    }
-    _stream->write(sum);
-    #ifdef DEBUG485
-      Serial.println();
-      Serial.print("pkt: A:");
-      Serial.print(cmd,DEC);
-      Serial.print(":");
-      Serial.print(len,DEC);
-      Serial.print(":");
+    uart_write_bytes(uart_num, "A", 1);
+    uart_write_bytes(uart_num, &cmd, 1);
+    uart_write_bytes(uart_num, &len, 1);
+    if(len)
+    {
+      uart_write_bytes(uart_num, b, len);
       for (byte f=0;f<len;f++) {
-        Serial.print(b[f],DEC);
-        Serial.print(":");
+        sum+=b[f];
       }
-      Serial.println(sum,DEC);
-      #endif
-      
-    if (_testreg) while (!(UCSR0A & _BV(TXC0)));
-    digitalWrite(_txenablepin, LOW);
+    }
+    uart_write_bytes(uart_num, &len, 1);
+    uart_write_bytes(uart_num, &sum, 1);
+}
+
+void Proto485::Rx()
+{
+  unsigned char c;
+  uint8_t len = uart_read_bytes(uart_num, &c, 1, 1);
+  if(len >0) ProcessaDatiSeriali(c);
+}
+
+void Proto485::SendPanelTemp(float)
+{
+
 }

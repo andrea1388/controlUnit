@@ -23,9 +23,8 @@ float TempSens::read()
 	}
     printf(" read\n"); */
     value=bus->getTempC((const DeviceAddress*)address);
-    if(abs(value-lastSignaledValue)>minTempGapBetweenSignal) _mustsignal=true;
-    else
-    if((lastSignaledTime-millis())>minTimeBetweenSignal) _mustsignal=true;
+    if((lastSignaledTime-millis())>minTimeBetweenSignal) 
+        if(abs(value-lastSignaledValue)>minTempGapBetweenSignal) _mustsignal=true;
     return value;
 }
 
