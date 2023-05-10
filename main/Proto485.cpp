@@ -82,7 +82,6 @@ void Proto485::Tx(char cmd, byte len, const char* b)
         sum+=b[f];
       }
     }
-    uart_write_bytes(uart_num, &len, 1);
     uart_write_bytes(uart_num, &sum, 1);
 }
 
@@ -93,7 +92,23 @@ void Proto485::Rx()
   if(len >0) ProcessaDatiSeriali(c);
 }
 
-void Proto485::SendPanelTemp(float)
+void Proto485::SendPanelTemp(float val)
 {
+  union {
+    float value;
+    byte data[4];
+  } u;
+  u.value=val;
+  Tx(CMDSENDPANELTEMP, 4, (const char *)u.data); 
+}
+
+void Proto485::SendTankTemp(float val)
+{
+  union {
+    float value;
+    byte data[4];
+  } u;
+  u.value=val;
+  Tx(CMDSENDTANKTEMP, 4, (const char *)u.data); 
 
 }

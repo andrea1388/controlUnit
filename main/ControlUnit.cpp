@@ -64,7 +64,7 @@ void ReadTransmitTemp()
 
     if(tankSensor.mustSignal())
     {
-        //bus485.SendTankTemp(tankSensor.value);
+        bus485.SendTankTemp(tankSensor.value);
         tankSensor.Signaled();
     }
 
