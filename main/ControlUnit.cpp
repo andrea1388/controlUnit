@@ -44,10 +44,52 @@ static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
 
-
-void ProcessBusCommand(byte comando,byte *bytesricevuti,byte len)
+void cmdSetTon(byte* buf)
 {
-    ESP_LOGD(TAG,"cmd: %02x len: %d",comando,len);
+    solarPump.tOn=1000*(buf[0]+buf[1]*256);
+    param.save("ton",solarPump.tOn);
+}
+
+void cmdSetToff(byte* buf)
+{
+    solarPump.tOff=1000*(buf[0]+buf[1]*256);
+    param.save("toff",solarPump.tOff);
+}
+
+void cmdSetDTACTPUMP(byte* buf)
+{
+    DT_ActPump=buf[0];
+    param.save("dtactpump",DT_ActPump);
+   
+}
+
+void ProcessBusCommand(byte cmd,byte *buf,byte len)
+{
+    ESP_LOGD(TAG,"cmd: %02x len: %d",cmd,len);
+    switch (cmd)
+    {
+        case CMD_STORE_CU_PARAM:
+            switch (buf[0])
+            {
+                case PARAM_TON:
+                    if (len==2) cmdSetTon(buf);
+                    break;
+                case PARAM_TOFF:
+                    if (len==2) cmdSetToff(buf);
+                    break;
+                case PARAM_DTACTPUMP:
+                    if (len==1) cmdSetDTACTPUMP(buf);
+                    break;
+                case else:
+                    //bus485.SendError("bad subparam");
+                    break;
+
+            };
+            break;
+        case else:
+            break;
+
+    }
 
 }
 
@@ -91,8 +133,8 @@ void app_main(void)
     bus485.cbElaboraComando=&ProcessBusCommand;
 
     panelSensor.setResolution(10);
-    param.load("Tsendtemps",&panelSensor.minTimeBetweenSignal);
-    param.load("DT_TxMqtt",&panelSensor.minTempGapBetweenSignal);
+    param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
+    param.load("dttx",&panelSensor.minTempGapBetweenSignal);
 
     tankSensor.setResolution(10);
     tankSensor.minTimeBetweenSignal=panelSensor.minTimeBetweenSignal;
@@ -103,8 +145,9 @@ void app_main(void)
 
     solarPump.tOn=1000;
     solarPump.tOff=1000;
-    param.load("Ton",&solarPump.tOn);
-    param.load("Toff",&solarPump.tOff);
+    param.load("ton",&solarPump.tOn);
+    param.load("toff",&solarPump.tOff);
+    param.load("dtactpump",&DT_ActPump);
 
     //scanSensors(&a);  // just to print sensor address
 
