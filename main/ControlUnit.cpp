@@ -1,6 +1,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include <stdio.h>
 #include "TempSens.h"
 #include "nvsparameters.h"
@@ -10,7 +11,8 @@
 #include "driver/uart.h"
 #include "millis.h"
 #include "Proto485.h"
-
+#include "wifi.h"
+#include "otafw.h"
 
 #define GPIO_SENSOR GPIO_NUM_23
 #define GPIO_PUMP GPIO_NUM_18
@@ -20,6 +22,9 @@
 #define UARTRX GPIO_NUM_16
 #define UARTRTS GPIO_NUM_18
 #define UARTCTS UART_PIN_NO_CHANGE
+#define WIFI_CONNECTED_BIT BIT0
+#define OTA_BIT      BIT1
+#define MAXCMDLEN 200
 
 extern "C" {
     void app_main(void);
@@ -43,27 +48,317 @@ NvsParameters param;
 static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
+EventGroupHandle_t event_group;
+WiFi wifi;
+Otafw otafw;
+char *otaurl; // otaurl https://otaserver:8070/SolarThermostat.bin
+extern const uint8_t ca_crt_start[] asm("_binary_ca_crt_start");
 
-void cmdSetTon(byte* buf)
+
+
+void Ota(void *o) 
+{
+    ESP_LOGI(TAG, "Starting OTA task");
+    for (;;) 
+    {
+        if(xEventGroupWaitBits(event_group,WIFI_CONNECTED_BIT | OTA_BIT, pdFALSE, pdTRUE, 1000/portTICK_PERIOD_MS) == (WIFI_CONNECTED_BIT | OTA_BIT)) 
+        {
+            ESP_LOGI(TAG, "Starting OTA update");
+            otafw.Check();        
+            xEventGroupClearBits(event_group, OTA_BIT);
+        }
+    }
+}
+
+void WiFiEvent(WiFi* wifi, uint8_t ev)
+{
+    switch(ev)
+    {
+        case WIFI_START: // start
+            wifi->Connect();
+            break;
+        case WIFI_DISCONNECT: // disconnected
+            xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT);
+            wifi->Connect();
+            statusLed.tOn=1000;
+            statusLed.tOff=1000;
+            break;
+        case WIFI_GOT_IP: // connected
+            xEventGroupSetBits(event_group, WIFI_CONNECTED_BIT);
+            ESP_LOGI(TAG,"GotIP");
+            statusLed.tOn=100;
+            statusLed.tOff=100;
+            break;
+
+    }
+}
+
+void WifiSetup()
+{
+    char *ssid=NULL;
+    char *password=NULL;
+    param.load("wifi_ssid",&ssid,"ssid");
+    param.load("wifi_password",&password,"password");
+    wifi.onEvent=&WiFiEvent;
+    if(ssid) wifi.Start(ssid,password);
+    free(ssid);
+    free(password);
+}
+
+void onNewCommand(char *s)
+{
+    uint8_t err=0;
+    const char *delim=" ";
+    ESP_LOGI(TAG,"New command=%s",s);
+    char *token = strtok(s, delim);
+    if(!token) return;
+    // mqtt uri
+    if (strcmp(token,"mqtturi")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_uri",token);
+            return;
+        }
+    }
+
+    // mqtt username
+    if (strcmp(token,"mqttuname")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_username",token);
+            return;
+        }
+    }
+
+
+    // wifi ssid
+    if (strcmp(token,"wifissid")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("wifi_ssid",token);
+            return;
+        }
+    }
+
+    // wifi password
+    if (strcmp(token,"wifipassword")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("wifi_password",token);
+            return;
+        }
+    }
+
+    // mqtt password
+    if (strcmp(token,"mqttpwd")==0 )
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_password",token);
+            return;
+        }
+    }
+    // mqtt_tptopic
+    if (strcmp(token,"mqtt_tptopic")==0 )
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_tptopic",token);
+            return;
+        }
+    }
+    if (strcmp(token,"mqtt_tttopic")==0 )
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_tttopic",token);
+            return;
+        }
+    }
+    if (strcmp(token,"mqtt_cttopic")==0 )
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("mqtt_cttopic",token);
+            return;
+        }
+    }
+
+    // ota url
+    if (strcmp(token,"otaurl")==0 )
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("otaurl",token);
+            esp_restart();
+        }
+    }
+
+    // restart
+    if (strcmp(token,"restart")==0)
+    {
+        esp_restart();
+    }
+
+
+
+
+    if (strcmp(token,"dtpump")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            int j=atoi(token);
+            if(j<1 || j>256) err=2;
+            if(err==0)
+            {
+                DT_ActPump=j;
+                param.save("dt_actpump",DT_ActPump);
+                return;
+            } 
+        }
+    }
+
+
+    if (strcmp(token,"tsendtemps")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            int j=atoi(token);
+            if(j<1 || j>256) err=2;
+            if(err==0)
+            {
+                param.save("Tsendtemps",j);
+                return;
+            } 
+        }
+    }
+
+    if (strcmp(token,"tread")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            int j=atoi(token);
+            if(j<1 || j>256) err=2;
+            if(err==0) {
+                Tread=j;
+                param.save("Tread",Tread);
+                return;
+            }
+        }
+    }
+
+    if (strcmp(token,"ton")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            int j=atoi(token);
+            if(j<1 || j>256) err=2;
+            if(err==0) {
+                //Ton=j;
+                param.save("Ton",j);
+                return;
+            }
+        }
+    }
+
+    if (strcmp(token,"toff")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            int j=atoi(token);
+            if(j<1 || j>256) err=2;
+            if(err==0) {
+                //Toff=j;
+                param.save("Toff",j);
+                return;
+            }
+        }
+    }
+    if (strcmp(token,"otacheck")==0)
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) {
+            xEventGroupSetBits(event_group,OTA_BIT);
+            return;
+        }
+    }
+
+    if(err==1)
+    {
+        printf("missing parameter\n");
+        return;
+    }
+    if(err==2)
+    {
+        printf("wrong value\n");
+        return;
+    }
+    printf("wrong command\n");
+}
+
+void ProcessStdin() {
+    static char cmd[MAXCMDLEN];
+    static uint8_t cmdlen=0;
+    int c = fgetc(stdin);
+    if(c!= EOF) 
+    {
+        printf("%c",c);
+        if(c=='\n') 
+        {
+            cmd[cmdlen]=0;
+            onNewCommand(cmd);
+            cmdlen=0;
+        }
+        else
+        {
+            cmd[cmdlen++]=c;
+            if(cmdlen==MAXCMDLEN-1) 
+            {
+                cmdlen=0;
+            }
+        }
+    }
+}
+
+
+void cmdSetTon(uint8_t* buf)
 {
     solarPump.tOn=1000*(buf[0]+buf[1]*256);
     param.save("ton",solarPump.tOn);
 }
 
-void cmdSetToff(byte* buf)
+void cmdSetToff(uint8_t* buf)
 {
     solarPump.tOff=1000*(buf[0]+buf[1]*256);
     param.save("toff",solarPump.tOff);
 }
 
-void cmdSetDTACTPUMP(byte* buf)
+void cmdSetDTACTPUMP(uint8_t* buf)
 {
     DT_ActPump=buf[0];
     param.save("dtactpump",DT_ActPump);
    
 }
 
-void ProcessBusCommand(byte cmd,byte *buf,byte len)
+void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 {
     ESP_LOGD(TAG,"cmd: %02x len: %d",cmd,len);
     switch (cmd)
@@ -80,13 +375,13 @@ void ProcessBusCommand(byte cmd,byte *buf,byte len)
                 case PARAM_DTACTPUMP:
                     if (len==1) cmdSetDTACTPUMP(buf);
                     break;
-                case else:
+                default:
                     //bus485.SendError("bad subparam");
                     break;
 
             };
             break;
-        case else:
+        default:
             break;
 
     }
@@ -129,7 +424,8 @@ void app_main(void)
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("ds18b20", ESP_LOG_INFO);
     esp_log_level_set("main", ESP_LOG_DEBUG);
-    
+    param.Init();
+    event_group = xEventGroupCreate();
     bus485.cbElaboraComando=&ProcessBusCommand;
 
     panelSensor.setResolution(10);
@@ -140,14 +436,23 @@ void app_main(void)
     tankSensor.minTimeBetweenSignal=panelSensor.minTimeBetweenSignal;
     tankSensor.minTempGapBetweenSignal=panelSensor.minTempGapBetweenSignal;
 
-    statusLed.tOn=100;
-    statusLed.tOff=100;
+    statusLed.tOn=1000;
+    statusLed.tOff=1000;
 
     solarPump.tOn=1000;
     solarPump.tOff=1000;
     param.load("ton",&solarPump.tOn);
     param.load("toff",&solarPump.tOff);
     param.load("dtactpump",&DT_ActPump);
+    param.load("tread",&Tread);
+
+    param.load("otaurl",&otaurl);
+    if(otaurl) 
+    {
+        otafw.Init(otaurl,(const char*)ca_crt_start);
+        xTaskCreate(&Ota, "ota_task", 8192, NULL, 5, NULL);
+        ESP_LOGI(TAG,"Ota started");
+    }
 
     //scanSensors(&a);  // just to print sensor address
 
@@ -159,6 +464,7 @@ void app_main(void)
         if((now - tLastRead) > Tread*1000) {ReadTransmitTemp(); tLastRead=now;};
         ProcessThermostat();
         bus485.Rx();
+        ProcessStdin();
         vTaskDelay(1);
     }
 }
