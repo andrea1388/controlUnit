@@ -3,6 +3,10 @@ typedef unsigned char byte;
 
 #define CMDSENDPANELTEMP 'i'
 #define CMDSENDTANKTEMP 'j'
+#define CMD_STORE_CU_PARAM 'k'
+#define PARAM_TON 'A'
+#define PARAM_TOFF 'B'
+#define PARAM_DTACTPUMP 'C'
 
 class Proto485 {
 public:

@@ -12,11 +12,12 @@ class TempSens
         void Signaled();
         float read();
         float value=0;
-        uint32_t minTimeBetweenSignal=10000;
+        uint16_t minTimeBetweenSignal=10; // in seconds
         uint8_t minTempGapBetweenSignal=1;
         //TempSens(ds18b20*,DeviceAddress*);
         TempSens(ds18b20*,const char*);
         bool setResolution(uint8_t);
         void requestTemperatures();
+        void SetAddress(const char*);
 
 };

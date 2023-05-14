@@ -14,13 +14,14 @@
 #include "wifi.h"
 #include "otafw.h"
 
+// https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html
 #define GPIO_SENSOR GPIO_NUM_23
 #define GPIO_PUMP GPIO_NUM_18
-#define GPIO_LED GPIO_NUM_4
-#define GPIO_BUTTON GPIO_NUM_13
-#define UARTTX GPIO_NUM_17
-#define UARTRX GPIO_NUM_16
-#define UARTRTS GPIO_NUM_18
+#define GPIO_LED GPIO_NUM_22
+#define GPIO_BUTTON GPIO_NUM_33
+#define UARTTX GPIO_NUM_21
+#define UARTRX GPIO_NUM_32
+#define UARTRTS GPIO_NUM_19
 #define UARTCTS UART_PIN_NO_CHANGE
 #define WIFI_CONNECTED_BIT BIT0
 #define OTA_BIT      BIT1
@@ -51,8 +52,9 @@ typedef unsigned char byte;
 EventGroupHandle_t event_group;
 WiFi wifi;
 Otafw otafw;
-char *otaurl; // otaurl https://otaserver:8070/SolarThermostat.bin
-extern const uint8_t ca_crt_start[] asm("_binary_ca_crt_start");
+char *otaurl; // otaurl https://otasrv:8070/ControlUnit.bin
+extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 
 
@@ -97,8 +99,8 @@ void WifiSetup()
 {
     char *ssid=NULL;
     char *password=NULL;
-    param.load("wifi_ssid",&ssid,"ssid");
-    param.load("wifi_password",&password,"password");
+    param.load("wifissid",&ssid,"ssid");
+    param.load("wifipassword",&password,"password");
     wifi.onEvent=&WiFiEvent;
     if(ssid) wifi.Start(ssid,password);
     free(ssid);
@@ -112,28 +114,6 @@ void onNewCommand(char *s)
     ESP_LOGI(TAG,"New command=%s",s);
     char *token = strtok(s, delim);
     if(!token) return;
-    // mqtt uri
-    if (strcmp(token,"mqtturi")==0)
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_uri",token);
-            return;
-        }
-    }
-
-    // mqtt username
-    if (strcmp(token,"mqttuname")==0)
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_username",token);
-            return;
-        }
-    }
-
 
     // wifi ssid
     if (strcmp(token,"wifissid")==0)
@@ -141,7 +121,7 @@ void onNewCommand(char *s)
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            param.save("wifi_ssid",token);
+            param.save("wifissid",token);
             return;
         }
     }
@@ -152,46 +132,7 @@ void onNewCommand(char *s)
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            param.save("wifi_password",token);
-            return;
-        }
-    }
-
-    // mqtt password
-    if (strcmp(token,"mqttpwd")==0 )
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_password",token);
-            return;
-        }
-    }
-    // mqtt_tptopic
-    if (strcmp(token,"mqtt_tptopic")==0 )
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_tptopic",token);
-            return;
-        }
-    }
-    if (strcmp(token,"mqtt_tttopic")==0 )
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_tttopic",token);
-            return;
-        }
-    }
-    if (strcmp(token,"mqtt_cttopic")==0 )
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("mqtt_cttopic",token);
+            param.save("wifipassword",token);
             return;
         }
     }
@@ -213,83 +154,64 @@ void onNewCommand(char *s)
         esp_restart();
     }
 
-
-
-
     if (strcmp(token,"dtpump")==0)
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            int j=atoi(token);
-            if(j<1 || j>256) err=2;
-            if(err==0)
-            {
+            uint8_t j=atoi(token);
                 DT_ActPump=j;
-                param.save("dt_actpump",DT_ActPump);
+                param.save("dtpump",DT_ActPump);
                 return;
-            } 
         }
     }
 
 
-    if (strcmp(token,"tsendtemps")==0)
+    if (strcmp(token,"tsendtemps")==0) // seconds between temp transmissions
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            int j=atoi(token);
-            if(j<1 || j>256) err=2;
-            if(err==0)
+            uint16_t j=atoi(token);
+            if(j)
             {
-                param.save("Tsendtemps",j);
+                param.save("tsendtemps",j);
                 return;
             } 
         }
     }
 
-    if (strcmp(token,"tread")==0)
+    if (strcmp(token,"tread")==0) // in seconds
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            int j=atoi(token);
-            if(j<1 || j>256) err=2;
-            if(err==0) {
+            uint8_t j=atoi(token);
+            if(j) {
                 Tread=j;
-                param.save("Tread",Tread);
+                param.save("tread",Tread);
                 return;
             }
         }
     }
 
-    if (strcmp(token,"ton")==0)
+    if (strcmp(token,"ton")==0) // in secs
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            int j=atoi(token);
-            if(j<1 || j>256) err=2;
-            if(err==0) {
-                //Ton=j;
-                param.save("Ton",j);
-                return;
-            }
+            uint8_t j=atoi(token);
+            if(j) {param.save("ton",j); return;}
         }
     }
 
-    if (strcmp(token,"toff")==0)
+    if (strcmp(token,"toff")==0) // in secs
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            int j=atoi(token);
-            if(j<1 || j>256) err=2;
-            if(err==0) {
-                //Toff=j;
-                param.save("Toff",j);
-                return;
-            }
+            uint8_t j=atoi(token);
+            if(j) {param.save("toff",j); return;}
         }
     }
     if (strcmp(token,"otacheck")==0)
@@ -301,17 +223,36 @@ void onNewCommand(char *s)
         }
     }
 
+    if (strcmp(token,"psadd")==0) // panel sensor address
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("psadd",token);
+            return;
+        }
+    }
+    if (strcmp(token,"tsadd")==0) // tank sensor address
+    {
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            param.save("tsadd",token);
+            return;
+        }
+    }
+
     if(err==1)
     {
-        printf("missing parameter\n");
+        ESP_LOGE(TAG,"missing parameter\n");
         return;
     }
     if(err==2)
     {
-        printf("wrong value\n");
+        ESP_LOGE(TAG,"wrong value\n");
         return;
     }
-    printf("wrong command\n");
+    ESP_LOGE(TAG,"wrong command\n");
 }
 
 void ProcessStdin() {
@@ -320,7 +261,7 @@ void ProcessStdin() {
     int c = fgetc(stdin);
     if(c!= EOF) 
     {
-        printf("%c",c);
+        ESP_LOGD(TAG,"%c",c);
         if(c=='\n') 
         {
             cmd[cmdlen]=0;
@@ -391,8 +332,8 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 void ReadTransmitTemp()
 {
     panelSensor.requestTemperatures(); // request for all sensors on the bus
-    printf("paneltemp: %.1f mustsignal:%d\n", panelSensor.read(),panelSensor.mustSignal());
-    printf("tanktemp: %.1f mustsignal:%d\n", tankSensor.read(),tankSensor.mustSignal());
+    ESP_LOGI(TAG,"paneltemp: %.1f mustsignal:%d\n", panelSensor.read(),panelSensor.mustSignal());
+    ESP_LOGI(TAG,"tanktemp: %.1f mustsignal:%d\n", tankSensor.read(),tankSensor.mustSignal());
     if(panelSensor.mustSignal())
     {
         bus485.SendPanelTemp(panelSensor.value);
@@ -422,39 +363,59 @@ void app_main(void)
 {
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
     esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("ds18b20", ESP_LOG_INFO);
+    //esp_log_level_set("Proto485", ESP_LOG_DEBUG);
     esp_log_level_set("main", ESP_LOG_DEBUG);
     param.Init();
     event_group = xEventGroupCreate();
     bus485.cbElaboraComando=&ProcessBusCommand;
 
     panelSensor.setResolution(10);
+
     param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
     param.load("dttx",&panelSensor.minTempGapBetweenSignal);
+    char *add=NULL;
+    param.load("psadd",&add);
+    if(add) {panelSensor.SetAddress(add); free(add);}
 
     tankSensor.setResolution(10);
     tankSensor.minTimeBetweenSignal=panelSensor.minTimeBetweenSignal;
     tankSensor.minTempGapBetweenSignal=panelSensor.minTempGapBetweenSignal;
+    add=NULL;
+    param.load("tsadd",&add);
+    if(add) {tankSensor.SetAddress(add); free(add);}
 
     statusLed.tOn=1000;
     statusLed.tOff=1000;
 
-    solarPump.tOn=1000;
-    solarPump.tOff=1000;
-    param.load("ton",&solarPump.tOn);
-    param.load("toff",&solarPump.tOff);
-    param.load("dtactpump",&DT_ActPump);
+    uint8_t t=1;
+    param.load("ton",&t);
+    solarPump.tOn=t*1000;
+    t=1;
+    param.load("toff",&t);
+    solarPump.tOff=t*1000;
+    
+    param.load("dtpump",&DT_ActPump);
     param.load("tread",&Tread);
 
     param.load("otaurl",&otaurl);
+
+    scanSensors(&a);  // just to print sensor address
+
+
+    xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT | OTA_BIT);
+
+    WifiSetup();
+
     if(otaurl) 
     {
-        otafw.Init(otaurl,(const char*)ca_crt_start);
+        otafw.Init(otaurl,(const char*)server_cert_pem_start);
         xTaskCreate(&Ota, "ota_task", 8192, NULL, 5, NULL);
         ESP_LOGI(TAG,"Ota started");
+        xEventGroupSetBits(event_group,  OTA_BIT);
     }
 
-    //scanSensors(&a);  // just to print sensor address
+    ESP_LOGI(TAG,"Starting. Tread=%u Ton=%lu Toff=%lu DT_ActPump=%u",Tread,solarPump.tOn,solarPump.tOff,DT_ActPump);
+
 
     uint32_t now,tLastRead=0;
     while(true)

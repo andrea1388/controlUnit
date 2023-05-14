@@ -3,3 +3,5 @@ components/
 .DS_Store
 build/
 .vscode/
+certs/ca_cert.pem
+certs/ca_key.pem
