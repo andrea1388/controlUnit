@@ -10,7 +10,9 @@ class Switch {
         uint32_t tOff; /*!< Off time interval expressed in milliseconds */
         gpio_num_t pin;
         void run(bool);
-        Switch(gpio_num_t pin);
+        Switch(gpio_num_t pin,gpio_mode_t,bool _inverted);
+        bool inverted;
+        bool State();
     private:
         void changeState(bool);
         bool lastReading;

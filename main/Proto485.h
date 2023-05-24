@@ -7,6 +7,9 @@ typedef unsigned char byte;
 #define PARAM_TON 'A'
 #define PARAM_TOFF 'B'
 #define PARAM_DTACTPUMP 'C'
+#define CMDREQUESTSTATUS 'l'
+#define CMDSENDSTATUS 'm'
+#define CMDRESTART 'n'
 
 class Proto485 {
 public:
@@ -17,6 +20,7 @@ public:
     void (*cbElaboraComando)(byte comando,byte *bytesricevuti,byte len);
     void SendPanelTemp(float);
     void SendTankTemp(float);
+    void SendStatus(uint8_t ton, uint8_t toff, uint8_t DT_ActPump);
 protected:
     uart_port_t uart_num;
 

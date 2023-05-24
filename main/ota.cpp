@@ -52,6 +52,7 @@ void Otafw::Init(const char* url, const char* cert)
 
 void Otafw::Check()
 {
+    ESP_LOGI(TAG, "url=%s",ota_config.http_config->url);
     esp_err_t ret = esp_https_ota(&ota_config);
     if (ret == ESP_OK) {
         esp_restart();

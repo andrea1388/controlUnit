@@ -6,25 +6,27 @@
 #include "esp_log.h"
 static const char *TAG = "Switch";
 
-Switch::Switch(gpio_num_t _pin) {
+Switch::Switch(gpio_num_t _pin,gpio_mode_t mode,bool _inverted) {
     pin=_pin;
     tOn=tOff=0;
     on=off=false;
     toggleMode=false;
     ESP_ERROR_CHECK(gpio_reset_pin(pin));
-    ESP_ERROR_CHECK(gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT));
-    gpio_set_level(pin,0);
-    tLastChange=0;
+    ESP_ERROR_CHECK(gpio_set_direction(pin, mode));
+    inverted=_inverted;
+    changeState(false);
 }
 
 void Switch::changeState(bool s) 
 {
+    if(inverted) s=!s;
     if(s) gpio_set_level(pin,1); else gpio_set_level(pin,0); 
     tLastChange=esp_timer_get_time();
 }
 
 void Switch::run(bool inp) {
     bool out=(gpio_get_level(pin)==1);
+    if(inverted) out=!out;
     int64_t now=esp_timer_get_time();
     
 
@@ -69,5 +71,12 @@ void Switch::run(bool inp) {
         }
     }
     previnp=inp;
+}
+
+bool Switch::State() 
+{
+    bool out=(gpio_get_level(pin)==1);
+    if(inverted) return !out;
+    return out;
 }
 

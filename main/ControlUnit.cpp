@@ -27,6 +27,7 @@
 #define OTA_BIT      BIT1
 #define MAXCMDLEN 200
 
+
 extern "C" {
     void app_main(void);
 }
@@ -42,8 +43,8 @@ uint8_t Tread=30; // interval in seconds between temperature readings
 
 ds18b20 a((gpio_num_t)GPIO_SENSOR);
 TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b");
-Switch solarPump(GPIO_PUMP);
-Switch statusLed(GPIO_LED);
+Switch solarPump(GPIO_PUMP,GPIO_MODE_INPUT_OUTPUT,true);
+Switch statusLed(GPIO_LED,GPIO_MODE_INPUT_OUTPUT,false);
 BinarySensor pushButton(GPIO_BUTTON,GPIO_PULLDOWN_ONLY);
 NvsParameters param;
 static const char *TAG = "main";
@@ -51,10 +52,12 @@ Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
 EventGroupHandle_t event_group;
 WiFi wifi;
+extern const uint8_t server_cert_pem_start[] asm("_binary_ca_crt_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_ca_crt_end");
+
 Otafw otafw;
-char *otaurl; // otaurl https://otasrv:8070/ControlUnit.bin
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+char *otaurl; // otaurl https://otasrv:8070/
+#define FWNAME "fwcu3.bin"
 
 
 
@@ -322,6 +325,12 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 
             };
             break;
+        case CMDREQUESTSTATUS:
+            bus485.SendStatus(solarPump.tOn/60000,solarPump.tOff/60000,DT_ActPump);
+            break;
+        case CMDRESTART:
+            esp_restart();
+            break;
         default:
             break;
 
@@ -355,7 +364,7 @@ void ProcessThermostat()
     bool cond=(panelSensor.value > tankSensor.value + DT_ActPump) || pushButton.state;
     solarPump.run(cond);
     statusLed.run(true); // flash
-    //ESP_LOGI(TAG,"cond=%d butt=%d",cond,pushButton.state);
+    ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
 }
 
 
@@ -364,12 +373,11 @@ void app_main(void)
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
     esp_log_level_set("*", ESP_LOG_INFO);
     //esp_log_level_set("Proto485", ESP_LOG_DEBUG);
-    esp_log_level_set("main", ESP_LOG_DEBUG);
+    esp_log_level_set("main", ESP_LOG_INFO);
+    scanSensors(&a);  // just to print sensor address
     param.Init();
     event_group = xEventGroupCreate();
     bus485.cbElaboraComando=&ProcessBusCommand;
-
-    panelSensor.setResolution(10);
 
     param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
     param.load("dttx",&panelSensor.minTempGapBetweenSignal);
@@ -377,30 +385,31 @@ void app_main(void)
     param.load("psadd",&add);
     if(add) {panelSensor.SetAddress(add); free(add);}
 
-    tankSensor.setResolution(10);
     tankSensor.minTimeBetweenSignal=panelSensor.minTimeBetweenSignal;
     tankSensor.minTempGapBetweenSignal=panelSensor.minTempGapBetweenSignal;
     add=NULL;
     param.load("tsadd",&add);
     if(add) {tankSensor.SetAddress(add); free(add);}
 
+    panelSensor.setResolution(10);
+    tankSensor.setResolution(10);
+
     statusLed.tOn=1000;
     statusLed.tOff=1000;
+    pushButton.toggle=true;
 
     uint8_t t=1;
     param.load("ton",&t);
-    solarPump.tOn=t*1000;
+    solarPump.tOn=t*1000*60;
     t=1;
     param.load("toff",&t);
-    solarPump.tOff=t*1000;
+    solarPump.tOff=t*1000*60;
+    solarPump.inverted=true;
     
     param.load("dtpump",&DT_ActPump);
     param.load("tread",&Tread);
 
     param.load("otaurl",&otaurl);
-
-    scanSensors(&a);  // just to print sensor address
-
 
     xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT | OTA_BIT);
 
@@ -408,7 +417,10 @@ void app_main(void)
 
     if(otaurl) 
     {
-        otafw.Init(otaurl,(const char*)server_cert_pem_start);
+        char url[100];
+        strcpy(url,otaurl);
+        strcat(url,FWNAME);
+        otafw.Init(url,(const char*)server_cert_pem_start);
         xTaskCreate(&Ota, "ota_task", 8192, NULL, 5, NULL);
         ESP_LOGI(TAG,"Ota started");
         xEventGroupSetBits(event_group,  OTA_BIT);

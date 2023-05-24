@@ -110,5 +110,13 @@ void Proto485::SendTankTemp(float val)
   } u;
   u.value=val;
   Tx(CMDSENDTANKTEMP, 4, (const char *)u.data); 
+}
 
+void Proto485::SendStatus(uint8_t ton, uint8_t toff, uint8_t DT_ActPump)
+{
+  uint8_t buf[3];
+  buf[0]=ton;
+  buf[1]=ton;
+  buf[2]=DT_ActPump;
+  Tx(CMDSENDSTATUS, 3, (const char *)buf); 
 }

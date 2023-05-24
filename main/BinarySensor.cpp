@@ -14,6 +14,8 @@ BinarySensor::BinarySensor(gpio_num_t _pin,gpio_pull_mode_t mode)
     ESP_ERROR_CHECK(gpio_set_direction(pin, GPIO_MODE_INPUT));
     ESP_ERROR_CHECK(gpio_set_pull_mode(pin,mode));
     tLastReading=0;
+    toggle=false;
+    state=false;
 /*     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_INPUT;
@@ -33,14 +35,18 @@ void BinarySensor::run()
 
 void BinarySensor::processInput()
 {
+    static bool lastinput=false;
     bool input=(gpio_get_level(pin)==1);
     
     ESP_LOGD(TAG,"inp= %d, state=%d",input, state);
 
-    if (state != input)
+    if(toggle)
     {
-        state = input;
+        if(input && !lastinput) state=!state;
     }
+    else
+        state = input;
+    lastinput=input;
 }
 
 bool BinarySensor::debouceTimeElapsed()

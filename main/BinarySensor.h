@@ -8,6 +8,7 @@ class BinarySensor
         void run();
         bool state;
         gpio_num_t pin;
+        bool toggle;
 
     private:
         int64_t tLastReading;
