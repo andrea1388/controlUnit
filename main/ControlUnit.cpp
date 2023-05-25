@@ -285,26 +285,29 @@ void ProcessStdin() {
 
 void cmdSetTon(uint8_t* buf)
 {
-    solarPump.tOn=1000*(buf[0]+buf[1]*256);
-    param.save("ton",solarPump.tOn);
+    uint8_t t=buf[1];
+    solarPump.tOn=60000*t;
+    param.save("ton",t);
 }
 
 void cmdSetToff(uint8_t* buf)
 {
-    solarPump.tOff=1000*(buf[0]+buf[1]*256);
-    param.save("toff",solarPump.tOff);
+    uint8_t t=buf[1];
+    solarPump.tOff=60000*t;
+    param.save("toff",t);
 }
 
 void cmdSetDTACTPUMP(uint8_t* buf)
 {
-    DT_ActPump=buf[0];
+    DT_ActPump=buf[1];
     param.save("dtactpump",DT_ActPump);
-   
+
 }
 
 void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 {
     ESP_LOGD(TAG,"cmd: %02x len: %d",cmd,len);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG,buf,len,ESP_LOG_DEBUG);
     switch (cmd)
     {
         case CMD_STORE_CU_PARAM:
@@ -317,7 +320,7 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
                     if (len==2) cmdSetToff(buf);
                     break;
                 case PARAM_DTACTPUMP:
-                    if (len==1) cmdSetDTACTPUMP(buf);
+                    if (len==2) cmdSetDTACTPUMP(buf);
                     break;
                 default:
                     //bus485.SendError("bad subparam");
@@ -406,7 +409,7 @@ void app_main(void)
     solarPump.tOff=t*1000*60;
     solarPump.inverted=true;
     
-    param.load("dtpump",&DT_ActPump);
+    param.load("dtactpump",&DT_ActPump);
     param.load("tread",&Tread);
 
     param.load("otaurl",&otaurl);
