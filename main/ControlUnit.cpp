@@ -375,7 +375,7 @@ void app_main(void)
 {
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
     esp_log_level_set("*", ESP_LOG_INFO);
-    //esp_log_level_set("Proto485", ESP_LOG_DEBUG);
+    //esp_log_level_set("Switch", ESP_LOG_DEBUG);
     esp_log_level_set("main", ESP_LOG_INFO);
     scanSensors(&a);  // just to print sensor address
     param.Init();

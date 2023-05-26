@@ -15,6 +15,7 @@ Switch::Switch(gpio_num_t _pin,gpio_mode_t mode,bool _inverted) {
     ESP_ERROR_CHECK(gpio_set_direction(pin, mode));
     inverted=_inverted;
     changeState(false);
+    previnp=false;
 }
 
 void Switch::changeState(bool s) 
