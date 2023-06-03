@@ -25,6 +25,7 @@
 #define UARTCTS UART_PIN_NO_CHANGE
 #define WIFI_CONNECTED_BIT BIT0
 #define OTA_BIT      BIT1
+#define WIFI_CONNECTION_STATUS BIT2
 #define MAXCMDLEN 200
 
 
@@ -57,7 +58,7 @@ extern const uint8_t server_cert_pem_end[] asm("_binary_ca_crt_end");
 
 Otafw otafw;
 char *otaurl; // otaurl https://otasrv:8070/
-#define FWNAME "fwcu3.bin"
+#define FWNAME "fwcu4.bin"
 
 
 
@@ -80,19 +81,19 @@ void WiFiEvent(WiFi* wifi, uint8_t ev)
     switch(ev)
     {
         case WIFI_START: // start
+            xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT);
+            xEventGroupSetBits(event_group, WIFI_CONNECTION_STATUS);
             wifi->Connect();
             break;
         case WIFI_DISCONNECT: // disconnected
             xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT);
+            xEventGroupSetBits(event_group, WIFI_CONNECTION_STATUS);
             wifi->Connect();
-            statusLed.tOn=1000;
-            statusLed.tOff=1000;
+
             break;
         case WIFI_GOT_IP: // connected
-            xEventGroupSetBits(event_group, WIFI_CONNECTED_BIT);
-            ESP_LOGI(TAG,"GotIP");
-            statusLed.tOn=100;
-            statusLed.tOff=100;
+            xEventGroupSetBits(event_group, WIFI_CONNECTED_BIT | WIFI_CONNECTION_STATUS);
+            //ESP_LOGI(TAG,"GotIP");
             break;
 
     }
@@ -370,6 +371,24 @@ void ProcessThermostat()
     ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
 }
 
+void ProcessStatusLed()
+{
+    if(xEventGroupGetBits(event_group) & WIFI_CONNECTION_STATUS)
+    {
+        if(xEventGroupGetBits(event_group) & WIFI_CONNECTED_BIT)
+        {
+            statusLed.tOn=100;
+            statusLed.tOff=100;
+        }
+        else
+        {
+            statusLed.tOn=1000;
+            statusLed.tOff=1000;
+        }
+        xEventGroupClearBits(event_group,WIFI_CONNECTION_STATUS);
+    }
+}
+
 
 void app_main(void)
 {
@@ -441,6 +460,7 @@ void app_main(void)
         ProcessThermostat();
         bus485.Rx();
         ProcessStdin();
+        ProcessStatusLed();
         vTaskDelay(1);
     }
 }
