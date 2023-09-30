@@ -19,6 +19,7 @@
 #define GPIO_PUMP GPIO_NUM_18
 #define GPIO_LED GPIO_NUM_22
 #define GPIO_BUTTON GPIO_NUM_33
+#define GPIO_VALVE GPIO_NUM_34
 #define UARTTX GPIO_NUM_21
 #define UARTRX GPIO_NUM_32
 #define UARTRTS GPIO_NUM_19
@@ -35,17 +36,18 @@ extern "C" {
 
 void scanSensors(ds18b20 *a)
 {
-    DeviceAddressList address[3];
-    a->search_all(address,3);
+    DeviceAddressList address[4];
+    a->search_all(address,4);
 }
 
 uint8_t DT_ActPump=2; // if Tpanel > Ttank + DT_ActPump, then pump is acted
 uint8_t Tread=30; // interval in seconds between temperature readings
 
 ds18b20 a((gpio_num_t)GPIO_SENSOR);
-TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b");
+TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b"),fpSensor(&a,"282beb56b5013c7a");
 Switch solarPump(GPIO_PUMP,GPIO_MODE_INPUT_OUTPUT,true);
 Switch statusLed(GPIO_LED,GPIO_MODE_INPUT_OUTPUT,false);
+Switch heatherSw(GPIO_VALVE,GPIO_MODE_INPUT_OUTPUT,true);
 BinarySensor pushButton(GPIO_BUTTON,GPIO_PULLDOWN_ONLY);
 NvsParameters param;
 static const char *TAG = "main";
@@ -368,6 +370,8 @@ void ProcessThermostat()
     bool cond=(panelSensor.value > tankSensor.value + DT_ActPump) || pushButton.state;
     solarPump.run(cond);
     statusLed.run(true); // flash
+    cond=fpSensor.value > (tankSensor.value + DT_ActPump);
+    heatherSw.run(cond);
     ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
 }
 
@@ -412,6 +416,12 @@ void app_main(void)
     add=NULL;
     param.load("tsadd",&add);
     if(add) {tankSensor.SetAddress(add); free(add);}
+
+    fpSensor.minTimeBetweenSignal=10;
+    fpSensor.minTempGapBetweenSignal=5;
+    add=NULL;
+    param.load("fpadd",&add);
+    if(add) {fpSensor.SetAddress(add); free(add);}
 
     panelSensor.setResolution(10);
     tankSensor.setResolution(10);
