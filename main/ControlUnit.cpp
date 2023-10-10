@@ -13,6 +13,7 @@
 #include "Proto485.h"
 #include "wifi.h"
 #include "otafw.h"
+#include "OneWireESP32.h"
 
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html
 #define GPIO_SENSOR GPIO_NUM_23
@@ -42,9 +43,8 @@ void scanSensors(ds18b20 *a)
 
 uint8_t DT_ActPump=2; // if Tpanel > Ttank + DT_ActPump, then pump is acted
 uint8_t Tread=30; // interval in seconds between temperature readings
-
-ds18b20 a((gpio_num_t)GPIO_SENSOR);
-TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b"),fpSensor(&a,"282beb56b5013c7a");
+OneWire32 ds(GPIO_SENSOR, 0, 1, 0);
+//TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b"),fpSensor(&a,"282beb56b5013c7a");
 Switch solarPump(GPIO_PUMP,GPIO_MODE_INPUT_OUTPUT,true);
 Switch statusLed(GPIO_LED,GPIO_MODE_INPUT_OUTPUT,false);
 Switch heatherSw(GPIO_VALVE,GPIO_MODE_INPUT_OUTPUT,true);
