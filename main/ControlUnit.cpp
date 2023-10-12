@@ -1,7 +1,12 @@
+#pragma region include
+#include "Arduino.h"
+#include "Debounce.hpp"
+#include "Toggle.hpp"
+#include "Oscillator.hpp"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
+#include "esp_freertos_hooks.h"
 #include <stdio.h>
 #include "TempSens.h"
 #include "nvsparameters.h"
@@ -15,6 +20,9 @@
 #include "otafw.h"
 #include "OneWireESP32.h"
 
+#pragma endregion
+
+#pragma region define
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html
 #define GPIO_SENSOR GPIO_NUM_23
 #define GPIO_PUMP GPIO_NUM_18
@@ -29,7 +37,11 @@
 #define OTA_BIT      BIT1
 #define WIFI_CONNECTION_STATUS BIT2
 #define MAXCMDLEN 200
+#define FWNAME "fwcu4.bin"
+const uint8_t MaxDevs = 2;
 
+float currTemp[MaxDevs];
+#pragma endregion
 
 extern "C" {
     void app_main(void);
@@ -41,6 +53,7 @@ void scanSensors(ds18b20 *a)
     a->search_all(address,4);
 }
 
+#pragma region globals
 uint8_t DT_ActPump=2; // if Tpanel > Ttank + DT_ActPump, then pump is acted
 uint8_t Tread=30; // interval in seconds between temperature readings
 OneWire32 ds(GPIO_SENSOR, 0, 1, 0);
@@ -49,69 +62,16 @@ Switch solarPump(GPIO_PUMP,GPIO_MODE_INPUT_OUTPUT,true);
 Switch statusLed(GPIO_LED,GPIO_MODE_INPUT_OUTPUT,false);
 Switch heatherSw(GPIO_VALVE,GPIO_MODE_INPUT_OUTPUT,true);
 BinarySensor pushButton(GPIO_BUTTON,GPIO_PULLDOWN_ONLY);
+Debounce btnDebounce;
 NvsParameters param;
 static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
-EventGroupHandle_t event_group;
-WiFi wifi;
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_crt_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_crt_end");
-
-Otafw otafw;
-char *otaurl; // otaurl https://otasrv:8070/
-#define FWNAME "fwcu4.bin"
+Toggle toggle1;
+Oscillator solarCtrl;
+#pragma endregion
 
 
-
-void Ota(void *o) 
-{
-    ESP_LOGI(TAG, "Starting OTA task");
-    for (;;) 
-    {
-        if(xEventGroupWaitBits(event_group,WIFI_CONNECTED_BIT | OTA_BIT, pdFALSE, pdTRUE, 1000/portTICK_PERIOD_MS) == (WIFI_CONNECTED_BIT | OTA_BIT)) 
-        {
-            ESP_LOGI(TAG, "Starting OTA update");
-            otafw.Check();        
-            xEventGroupClearBits(event_group, OTA_BIT);
-        }
-    }
-}
-
-void WiFiEvent(WiFi* wifi, uint8_t ev)
-{
-    switch(ev)
-    {
-        case WIFI_START: // start
-            xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT);
-            xEventGroupSetBits(event_group, WIFI_CONNECTION_STATUS);
-            wifi->Connect();
-            break;
-        case WIFI_DISCONNECT: // disconnected
-            xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT);
-            xEventGroupSetBits(event_group, WIFI_CONNECTION_STATUS);
-            wifi->Connect();
-
-            break;
-        case WIFI_GOT_IP: // connected
-            xEventGroupSetBits(event_group, WIFI_CONNECTED_BIT | WIFI_CONNECTION_STATUS);
-            //ESP_LOGI(TAG,"GotIP");
-            break;
-
-    }
-}
-
-void WifiSetup()
-{
-    char *ssid=NULL;
-    char *password=NULL;
-    param.load("wifissid",&ssid,"ssid");
-    param.load("wifipassword",&password,"password");
-    wifi.onEvent=&WiFiEvent;
-    if(ssid) wifi.Start(ssid,password);
-    free(ssid);
-    free(password);
-}
 
 void onNewCommand(char *s)
 {
@@ -363,35 +323,90 @@ void ReadTransmitTemp()
 
 }
 
-
-void ProcessThermostat() 
+void onPanelTempChange()
 {
-    pushButton.run();
-    bool cond=(panelSensor.value > tankSensor.value + DT_ActPump) || pushButton.state;
+    if(panelSensor.value > tankSensor.value + DT_ActPump)
+        solarPumpControl.On();
+    else
+        solarPumpControl.Off();
+}
+
+void onButtonPin()
+{
+    btnDebounce.set(digitalRead(GPIO_BUTTON));
+}
+void onButtonCtrl()
+{
+    if(btnCtrl.click) toggle1.toggle();
+}
+
+void onToggle1(bool state)
+{
+    onSolarOutPin();
+}
+
+void onsolarCtrl()
+{
+    onSolarOutPin();
+}
+
+void onSolarOutPin()
+{
+    solarPumpPin.set(toggle1 || solarCtrl);
+}
+
+bool onIdle()
+{
+    solarCtrl.run();
+    return true;
+}
+void ProcessThermostat()    
+{
+    bool cond=(panelSensor.value > tankSensor.value + DT_ActPump);
+    solarCtrl.enabled=cond;
+
+
     solarPump.run(cond);
     statusLed.run(true); // flash
     cond=fpSensor.value > (tankSensor.value + DT_ActPump);
     heatherSw.run(cond);
     ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
-}
 
-void ProcessStatusLed()
-{
-    if(xEventGroupGetBits(event_group) & WIFI_CONNECTION_STATUS)
-    {
-        if(xEventGroupGetBits(event_group) & WIFI_CONNECTED_BIT)
-        {
-            statusLed.tOn=100;
-            statusLed.tOff=100;
-        }
-        else
-        {
-            statusLed.tOn=1000;
-            statusLed.tOff=1000;
-        }
-        xEventGroupClearBits(event_group,WIFI_CONNECTION_STATUS);
-    }
-}
+
+void tempTask(void *pvParameters){
+	OneWire32 ds(23, 0, 1, 0); //gpio pin, tx, rx, parasite power
+	// There are 8 RMT channels (0-7) available on ESP32 for tx/rx
+	
+	//uint64_t addr[MaxDevs];
+	
+	uint64_t addr[] = {
+		0x7b3c01b556eb2b28
+	};
+	
+	//to find addresses
+	uint8_t devices = 1;
+	// ds.search(addr, MaxDevs);
+	for (uint8_t i = 0; i < devices; i += 1) {
+		Serial.printf("%d: 0x%llx,\n", i, addr[i]);
+		//char buf[20]; snprintf( buf, 20, "0x%llx,", addr[i] ); Serial.println(buf);
+	}
+	//end
+
+	for(;;){
+		ds.request();
+		vTaskDelay(750 / portTICK_PERIOD_MS);
+		for(byte i = 0; i < MaxDevs; i++){
+			uint8_t err = ds.getTemp(addr[i], currTemp[i]);
+			if(err){
+				const char *errt[] = {"", "CRC", "BAD","DC","DRV"};
+				Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
+			}else{
+				Serial.print(i); Serial.print(": "); Serial.println(currTemp[i]);
+			}
+		}
+		vTaskDelay(3000 / portTICK_PERIOD_MS);
+	}
+} // tempTask
 
 
 void app_main(void)
@@ -402,7 +417,7 @@ void app_main(void)
     esp_log_level_set("main", ESP_LOG_INFO);
     scanSensors(&a);  // just to print sensor address
     param.Init();
-    event_group = xEventGroupCreate();
+
     bus485.cbElaboraComando=&ProcessBusCommand;
 
     param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
@@ -429,6 +444,8 @@ void app_main(void)
     statusLed.tOn=1000;
     statusLed.tOff=1000;
     pushButton.toggle=true;
+    btnDebounce.onClick=onButtonCtrl;
+    toggle1.onChange=onToggle1;
 
     uint8_t t=1;
     param.load("ton",&t);
@@ -441,27 +458,19 @@ void app_main(void)
     param.load("dtactpump",&DT_ActPump);
     param.load("tread",&Tread);
 
-    param.load("otaurl",&otaurl);
 
-    xEventGroupClearBits(event_group, WIFI_CONNECTED_BIT | OTA_BIT);
+    attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), onButtonPin, CHANGE);
+    
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &onTimer, true);
 
-    WifiSetup();
 
-    if(otaurl) 
-    {
-        char url[100];
-        strcpy(url,otaurl);
-        strcat(url,FWNAME);
-        otafw.Init(url,(const char*)server_cert_pem_start);
-        xTaskCreate(&Ota, "ota_task", 8192, NULL, 5, NULL);
-        ESP_LOGI(TAG,"Ota started");
-        xEventGroupSetBits(event_group,  OTA_BIT);
-    }
 
     ESP_LOGI(TAG,"Starting. Tread=%u Ton=%lu Toff=%lu DT_ActPump=%u",Tread,solarPump.tOn,solarPump.tOff,DT_ActPump);
 
 
     uint32_t now,tLastRead=0;
+    esp_register_freertos_idle_hook(onIdle);
     while(true)
     {
         now=millis();
