@@ -62,3 +62,11 @@ void TempSens::SetAddress(const char * a)
     ds18b20::HexToDeviceAddress(address,a);
     ESP_LOG_BUFFER_HEX(TAG,address,8);
 }
+
+void TempSens::setValue(float v)
+{
+    value=v;
+    if((lastSignaledTime-millis())*1000>minTimeBetweenSignal) 
+        if(abs(value-lastSignaledValue)>minTempGapBetweenSignal) onChange();
+
+}

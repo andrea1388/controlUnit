@@ -1,3 +1,8 @@
+# Libraries/components) used
+# https://github.com/rpolitex/ArduinoNvs.git
+# https://github.com/htmltiger/esp32-ds18b20.git
+
+
 #pragma region include
 #include "Arduino.h"
 #include "Debounce.hpp"
@@ -38,20 +43,18 @@
 #define WIFI_CONNECTION_STATUS BIT2
 #define MAXCMDLEN 200
 #define FWNAME "fwcu4.bin"
-const uint8_t MaxDevs = 2;
+#define MaxDevs 3
+#define SOLARPANELTEMPSENSOR 0
+#define TANKTEMPSENSOR 1
+#define FPTEMPSENSOR 2
 
-float currTemp[MaxDevs];
 #pragma endregion
 
 extern "C" {
     void app_main(void);
 }
 
-void scanSensors(ds18b20 *a)
-{
-    DeviceAddressList address[4];
-    a->search_all(address,4);
-}
+
 
 #pragma region globals
 uint8_t DT_ActPump=2; // if Tpanel > Ttank + DT_ActPump, then pump is acted
@@ -69,6 +72,9 @@ Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
 Toggle toggle1;
 Oscillator solarCtrl;
+float currTemp[MaxDevs];
+uint64_t addr[MaxDevs];
+TempSens sensor[MaxDevs];
 #pragma endregion
 
 
@@ -357,6 +363,12 @@ void onSolarOutPin()
 
 bool onIdle()
 {
+    static uint32_t lastTempCheck=0;
+    uint32_t m=millis();
+    if((millis() - lastTempCheck) > 2000) {
+        readTemperatures();
+        lastTempCheck=m;
+    } 
     solarCtrl.run();
     return true;
 }
@@ -371,42 +383,34 @@ void ProcessThermostat()
     cond=fpSensor.value > (tankSensor.value + DT_ActPump);
     heatherSw.run(cond);
     ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
+}
 
-
-void tempTask(void *pvParameters){
-	OneWire32 ds(23, 0, 1, 0); //gpio pin, tx, rx, parasite power
-	// There are 8 RMT channels (0-7) available on ESP32 for tx/rx
-	
-	//uint64_t addr[MaxDevs];
-	
-	uint64_t addr[] = {
-		0x7b3c01b556eb2b28
-	};
-	
-	//to find addresses
-	uint8_t devices = 1;
-	// ds.search(addr, MaxDevs);
+void searchSensors() {
+    uint8_t devices=ds.search(addr, MaxDevs);
 	for (uint8_t i = 0; i < devices; i += 1) {
-		Serial.printf("%d: 0x%llx,\n", i, addr[i]);
+		Serial.printf("Sensor %d: 0x%llx,\n", i, addr[i]);
 		//char buf[20]; snprintf( buf, 20, "0x%llx,", addr[i] ); Serial.println(buf);
 	}
-	//end
+}
 
-	for(;;){
-		ds.request();
-		vTaskDelay(750 / portTICK_PERIOD_MS);
-		for(byte i = 0; i < MaxDevs; i++){
-			uint8_t err = ds.getTemp(addr[i], currTemp[i]);
-			if(err){
-				const char *errt[] = {"", "CRC", "BAD","DC","DRV"};
-				Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
-			}else{
-				Serial.print(i); Serial.print(": "); Serial.println(currTemp[i]);
-			}
-		}
-		vTaskDelay(3000 / portTICK_PERIOD_MS);
-	}
-} // tempTask
+void readTemperatures()
+{
+    ds.request();
+    vTaskDelay(750 / portTICK_PERIOD_MS);
+    uint64_t a;
+    float v;
+    for(byte i = 0; i < MaxDevs; i++){
+        a=sensor[i].addr;
+        uint8_t err = ds.getTemp(&a, &v);
+        if(err){
+            const char *errt[] = {"", "CRC", "BAD","DC","DRV"};
+            Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
+        }else{
+            sensor[i].setValue(v);
+            Serial.print(i); Serial.print(": "); Serial.println(currTemp[i]);
+        }
+    }
+}
 
 
 void app_main(void)
@@ -415,10 +419,12 @@ void app_main(void)
     esp_log_level_set("*", ESP_LOG_INFO);
     //esp_log_level_set("Switch", ESP_LOG_DEBUG);
     esp_log_level_set("main", ESP_LOG_INFO);
-    scanSensors(&a);  // just to print sensor address
+    searchSensors();
     param.Init();
 
     bus485.cbElaboraComando=&ProcessBusCommand;
+
+    sensor[SOLARPANELTEMPSENSOR].addr = NVS.getInt("SOLARPANELTEMPSENSOR"); 
 
     param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
     param.load("dttx",&panelSensor.minTempGapBetweenSignal);

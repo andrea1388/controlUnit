@@ -19,5 +19,9 @@ class TempSens
         bool setResolution(uint8_t);
         void requestTemperatures();
         void SetAddress(const char*);
+        void (*onChange)(float t);
+        uint64_t addr;
+        float value;
+        void setValue(float v);
 
 };
