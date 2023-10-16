@@ -41,7 +41,6 @@
 #define WIFI_CONNECTION_STATUS BIT2
 #define MAXCMDLEN 200
 #define FWNAME "fwcu4.bin"
-#define MaxDevs 3
 #define SOLARPANELTEMPSENSOR 0
 #define TANKTEMPSENSOR 1
 #define FPTEMPSENSOR 2
@@ -56,22 +55,15 @@ extern "C" {
 
 #pragma region globals
 uint8_t DT_ActPump=2; // if Tpanel > Ttank + DT_ActPump, then pump is acted
-uint8_t Tread=30; // interval in seconds between temperature readings
+uint8_t Tread; // interval in seconds between temperature readings
 OneWire32 ds(GPIO_SENSOR, 0, 1, 0);
 //TempSens panelSensor(&a,"28b10056b5013caf"), tankSensor(&a,"282beb56b5013c7b"),fpSensor(&a,"282beb56b5013c7a");
-Switch solarPump(GPIO_PUMP,GPIO_MODE_INPUT_OUTPUT,true);
-Switch statusLed(GPIO_LED,GPIO_MODE_INPUT_OUTPUT,false);
-Switch heatherSw(GPIO_VALVE,GPIO_MODE_INPUT_OUTPUT,true);
-BinarySensor pushButton(GPIO_BUTTON,GPIO_PULLDOWN_ONLY);
-Debounce btnDebounce;
-NvsParameters param;
 static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
+Debounce btnDebounce;
 Toggle toggle1;
 Oscillator solarCtrl,ledCtrl;
-float currTemp[MaxDevs];
-uint64_t addr[MaxDevs];
 TempSens sensor[MaxDevs];
 #pragma endregion
 
@@ -308,39 +300,9 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 
 }
 
-void ReadTransmitTemp()
-{
-    panelSensor.requestTemperatures(); // request for all sensors on the bus
-    ESP_LOGI(TAG,"paneltemp: %.1f mustsignal:%d\n", panelSensor.read(),panelSensor.mustSignal());
-    ESP_LOGI(TAG,"tanktemp: %.1f mustsignal:%d\n", tankSensor.read(),tankSensor.mustSignal());
-    if(panelSensor.mustSignal())
-    {
-        bus485.SendPanelTemp(panelSensor.value);
-        panelSensor.Signaled();
-    }
-
-    if(tankSensor.mustSignal())
-    {
-        bus485.SendTankTemp(tankSensor.value);
-        tankSensor.Signaled();
-    }
-
-}
-
 void onTempChange(float f)
 {
-    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].value > sensor[TANKTEMPSENSOR].value + DT_ActPump);
-}
-
-
-
-void onButtonPin()
-{
-    btnDebounce.set(digitalRead(GPIO_BUTTON));
-}
-void onButtonCtrl()
-{
-    if(btnCtrl.click) toggle1.toggle();
+    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].getValue() > sensor[TANKTEMPSENSOR].getValue() + DT_ActPump);
 }
 
 void onSolarOutPin(bool b)
@@ -352,16 +314,20 @@ bool onIdle()
 {
     static uint32_t lastTempCheck=0;
     uint32_t m=millis();
-    if((millis() - lastTempCheck) > 2000) {
+    if((millis() - lastTempCheck) > Tread*1000) {
         readTemperatures();
         lastTempCheck=m;
     } 
     solarCtrl.run();
-    return true;
+    bus485.Rx();
+    ProcessStdin();
+    return false;
 }
 
 
 void searchSensors() {
+    #define MaxDevs 3
+    uint64_t addr[MaxDevs];
     uint8_t devices=ds.search(addr, MaxDevs);
 	for (uint8_t i = 0; i < devices; i += 1) {
 		Serial.printf("Sensor %d: 0x%llx,\n", i, addr[i]);
@@ -413,42 +379,13 @@ void app_main(void)
     btnDebounce.begin([]() {toggle1.toggle();});
 
     toggle1.begin(onSolarOutPin);
-
-    uint8_t t=1;
-    param.load("ton",&t);
-    solarPump.tOn=t*1000*60;
-    t=1;
-    param.load("toff",&t);
-    solarPump.tOff=t*1000*60;
-    solarPump.inverted=true;
+    attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), [](){btnDebounce.set(digitalRead(GPIO_BUTTON));}, CHANGE);
+    
     
     param.load("dtactpump",&DT_ActPump);
-    param.load("tread",&Tread);
-
-
-    attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), onButtonPin, CHANGE);
-    
-    timer = timerBegin(0, 80, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-
-
-
-    ESP_LOGI(TAG,"Starting. Tread=%u Ton=%lu Toff=%lu DT_ActPump=%u",Tread,solarPump.tOn,solarPump.tOff,DT_ActPump);
-
-
-    uint32_t now,tLastRead=0;
-
-
+    Tread=NVS.getInt("tread",10)
     esp_register_freertos_idle_hook(onIdle);
-    while(true)
-    {
-        now=millis();
-        //ESP_LOGI(TAG,"millis: %ld tlr: %ld",now,tLastRead);
-        if((now - tLastRead) > Tread*1000) {ReadTransmitTemp(); tLastRead=now;};
-        ProcessThermostat();
-        bus485.Rx();
-        ProcessStdin();
-        ProcessStatusLed();
-        vTaskDelay(1);
-    }
+
+    ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
+
 }

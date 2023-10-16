@@ -1,11 +1,3 @@
-
-components/
 .DS_Store
 build/
 .vscode/
-certs/ca_cert.pem
-certs/ca_key.pem
-certs/ca.crt
-certs/ca.key
-certs/server.crt
-certs/server.key
