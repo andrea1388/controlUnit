@@ -1,4 +1,4 @@
-# Libraries/components) used
+# Libraries/components used
 # https://github.com/rpolitex/ArduinoNvs.git
 # https://github.com/htmltiger/esp32-ds18b20.git
 
@@ -17,13 +17,11 @@
 #include "nvsparameters.h"
 #include "BinarySensor.h"
 #include "Switch.h"
-#include "esp_timer.h"
+// #include "esp_timer.h"
 #include "driver/uart.h"
-#include "millis.h"
 #include "Proto485.h"
-#include "wifi.h"
-#include "otafw.h"
 #include "OneWireESP32.h"
+#include "ArduinoNvs.h"
 
 #pragma endregion
 
@@ -71,7 +69,7 @@ static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
 Toggle toggle1;
-Oscillator solarCtrl;
+Oscillator solarCtrl,ledCtrl;
 float currTemp[MaxDevs];
 uint64_t addr[MaxDevs];
 TempSens sensor[MaxDevs];
@@ -329,13 +327,12 @@ void ReadTransmitTemp()
 
 }
 
-void onPanelTempChange()
+void onTempChange(float f)
 {
-    if(panelSensor.value > tankSensor.value + DT_ActPump)
-        solarPumpControl.On();
-    else
-        solarPumpControl.Off();
+    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].value > sensor[TANKTEMPSENSOR].value + DT_ActPump);
 }
+
+
 
 void onButtonPin()
 {
@@ -346,19 +343,9 @@ void onButtonCtrl()
     if(btnCtrl.click) toggle1.toggle();
 }
 
-void onToggle1(bool state)
+void onSolarOutPin(bool b)
 {
-    onSolarOutPin();
-}
-
-void onsolarCtrl()
-{
-    onSolarOutPin();
-}
-
-void onSolarOutPin()
-{
-    solarPumpPin.set(toggle1 || solarCtrl);
+    digitalWrite(GPIO_J,(toggle1 || solarCtrl);
 }
 
 bool onIdle()
@@ -372,18 +359,7 @@ bool onIdle()
     solarCtrl.run();
     return true;
 }
-void ProcessThermostat()    
-{
-    bool cond=(panelSensor.value > tankSensor.value + DT_ActPump);
-    solarCtrl.enabled=cond;
 
-
-    solarPump.run(cond);
-    statusLed.run(true); // flash
-    cond=fpSensor.value > (tankSensor.value + DT_ActPump);
-    heatherSw.run(cond);
-    ESP_LOGD(TAG,"cond=%d butt=%d pump=%d",cond,pushButton.state,solarPump.State());
-}
 
 void searchSensors() {
     uint8_t devices=ds.search(addr, MaxDevs);
@@ -407,7 +383,7 @@ void readTemperatures()
             Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
         }else{
             sensor[i].setValue(v);
-            Serial.print(i); Serial.print(": "); Serial.println(currTemp[i]);
+            Serial.print(i); Serial.print(": "); Serial.println(v);
         }
     }
 }
@@ -415,6 +391,7 @@ void readTemperatures()
 
 void app_main(void)
 {
+    NVS.begin();
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
     esp_log_level_set("*", ESP_LOG_INFO);
     //esp_log_level_set("Switch", ESP_LOG_DEBUG);
@@ -424,34 +401,18 @@ void app_main(void)
 
     bus485.cbElaboraComando=&ProcessBusCommand;
 
-    sensor[SOLARPANELTEMPSENSOR].addr = NVS.getInt("SOLARPANELTEMPSENSOR"); 
 
-    param.load("tsendtemps",&panelSensor.minTimeBetweenSignal);
-    param.load("dttx",&panelSensor.minTempGapBetweenSignal);
-    char *add=NULL;
-    param.load("psadd",&add);
-    if(add) {panelSensor.SetAddress(add); free(add);}
+    sensor[SOLARPANELTEMPSENSOR].begin(NVS.getInt("sptsadd"),onTempChange,[](float f) { bus485.SendPanelTemp(f); });
+    sensor[TANKTEMPSENSOR].begin(NVS.getInt("tatsadd"),onTempChange,[](float f) { bus485.SendTankTemp(f); });
 
-    tankSensor.minTimeBetweenSignal=panelSensor.minTimeBetweenSignal;
-    tankSensor.minTempGapBetweenSignal=panelSensor.minTempGapBetweenSignal;
-    add=NULL;
-    param.load("tsadd",&add);
-    if(add) {tankSensor.SetAddress(add); free(add);}
 
-    fpSensor.minTimeBetweenSignal=10;
-    fpSensor.minTempGapBetweenSignal=5;
-    add=NULL;
-    param.load("fpadd",&add);
-    if(add) {fpSensor.SetAddress(add); free(add);}
+    solarCtrl.begin(NVS.getInt("ton"),NVS.getInt("toff"),onSolarOutPin,false);
 
-    panelSensor.setResolution(10);
-    tankSensor.setResolution(10);
+    ledCtrl.begin(1000,1000,[](bool b) { digitalWrite(GPIO_LED,b); },true);
 
-    statusLed.tOn=1000;
-    statusLed.tOff=1000;
-    pushButton.toggle=true;
-    btnDebounce.onClick=onButtonCtrl;
-    toggle1.onChange=onToggle1;
+    btnDebounce.begin([]() {toggle1.toggle();});
+
+    toggle1.begin(onSolarOutPin);
 
     uint8_t t=1;
     param.load("ton",&t);
@@ -476,6 +437,8 @@ void app_main(void)
 
 
     uint32_t now,tLastRead=0;
+
+
     esp_register_freertos_idle_hook(onIdle);
     while(true)
     {
