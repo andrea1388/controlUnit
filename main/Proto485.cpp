@@ -1,6 +1,6 @@
+#include "Arduino.h"
 #include "esp_log.h"
 #include "Proto485.h"
-#include "millis.h"
 #include "soc/uart_reg.h"
 #include "soc/soc.h"
 //#define DEBUG485
@@ -22,7 +22,7 @@ Proto485::Proto485(uart_port_t _uart_num, int tx_io_num, int rx_io_num, int rts_
   .stop_bits = UART_STOP_BITS_1,
   .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
   .rx_flow_ctrl_thresh = 122,
-  .source_clk = UART_SCLK_DEFAULT
+  //.source_clk = UART_SCLK_DEFAULT
   };
   REG_SET_BIT(UART_CONF1_REG(uart_num),UART_RS485TX_RX_EN);
 

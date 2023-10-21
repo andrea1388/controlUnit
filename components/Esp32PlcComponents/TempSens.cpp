@@ -15,3 +15,14 @@ void TempSens::setValue(float v)
     }
 
 }
+
+void TempSens::begin(uint64_t _addr, void (*_onChange)(float t), void (*_onSignal)(float t), uint16_t _minTimeBetweenSignal, uint8_t _minTempGapBetweenSignal)
+{
+    addr=_addr;
+    minTimeBetweenSignal=_minTempGapBetweenSignal;
+    minTempGapBetweenSignal=_minTempGapBetweenSignal;
+    onChange=_onChange;
+    onSignal=_onSignal;
+
+
+}

@@ -1,6 +1,6 @@
-# Libraries/components used
-# https://github.com/rpolitex/ArduinoNvs.git
-# https://github.com/htmltiger/esp32-ds18b20.git
+// Libraries/components used
+// https://github.com/rpolitex/ArduinoNvs.git
+// https://github.com/htmltiger/esp32-ds18b20.git
 
 
 #pragma region include
@@ -8,15 +8,12 @@
 #include "Debounce.hpp"
 #include "Toggle.hpp"
 #include "Oscillator.hpp"
-#include "esp_log.h"
+//#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_freertos_hooks.h"
 #include <stdio.h>
 #include "TempSens.h"
-#include "nvsparameters.h"
-#include "BinarySensor.h"
-#include "Switch.h"
 // #include "esp_timer.h"
 #include "driver/uart.h"
 #include "Proto485.h"
@@ -40,10 +37,10 @@
 #define OTA_BIT      BIT1
 #define WIFI_CONNECTION_STATUS BIT2
 #define MAXCMDLEN 200
-#define FWNAME "fwcu4.bin"
 #define SOLARPANELTEMPSENSOR 0
 #define TANKTEMPSENSOR 1
 #define FPTEMPSENSOR 2
+#define MaxDevs 3
 
 #pragma endregion
 
@@ -73,42 +70,10 @@ void onNewCommand(char *s)
 {
     uint8_t err=0;
     const char *delim=" ";
-    ESP_LOGI(TAG,"New command=%s",s);
+    //ESP_LOGI(TAG,"New command=%s",s);
     char *token = strtok(s, delim);
     if(!token) return;
 
-    // wifi ssid
-    if (strcmp(token,"wifissid")==0)
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("wifissid",token);
-            return;
-        }
-    }
-
-    // wifi password
-    if (strcmp(token,"wifipassword")==0)
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("wifipassword",token);
-            return;
-        }
-    }
-
-    // ota url
-    if (strcmp(token,"otaurl")==0 )
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) err=1;
-        if(err==0) {
-            param.save("otaurl",token);
-            esp_restart();
-        }
-    }
 
     // restart
     if (strcmp(token,"restart")==0)
@@ -123,7 +88,7 @@ void onNewCommand(char *s)
         if(err==0) {
             uint8_t j=atoi(token);
                 DT_ActPump=j;
-                param.save("dtpump",DT_ActPump);
+                NVS.setInt("dtpump",DT_ActPump);
                 return;
         }
     }
@@ -137,7 +102,7 @@ void onNewCommand(char *s)
             uint16_t j=atoi(token);
             if(j)
             {
-                param.save("tsendtemps",j);
+                NVS.setInt("tsendtemps",j);
                 return;
             } 
         }
@@ -151,7 +116,7 @@ void onNewCommand(char *s)
             uint8_t j=atoi(token);
             if(j) {
                 Tread=j;
-                param.save("tread",Tread);
+                NVS.setInt("tread",Tread);
                 return;
             }
         }
@@ -163,7 +128,7 @@ void onNewCommand(char *s)
         if(token==NULL) err=1;
         if(err==0) {
             uint8_t j=atoi(token);
-            if(j) {param.save("ton",j); return;}
+            if(j) {NVS.setInt("ton",j); return;}
         }
     }
 
@@ -173,24 +138,17 @@ void onNewCommand(char *s)
         if(token==NULL) err=1;
         if(err==0) {
             uint8_t j=atoi(token);
-            if(j) {param.save("toff",j); return;}
+            if(j) {NVS.setInt("toff",j); return;}
         }
     }
-    if (strcmp(token,"otacheck")==0)
-    {
-        token = strtok(NULL, delim);
-        if(token==NULL) {
-            xEventGroupSetBits(event_group,OTA_BIT);
-            return;
-        }
-    }
+
 
     if (strcmp(token,"psadd")==0) // panel sensor address
     {
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            param.save("psadd",token);
+            NVS.setString("psadd",token);
             return;
         }
     }
@@ -199,22 +157,23 @@ void onNewCommand(char *s)
         token = strtok(NULL, delim);
         if(token==NULL) err=1;
         if(err==0) {
-            param.save("tsadd",token);
+            NVS.setString("tsadd",token);
             return;
         }
     }
 
     if(err==1)
     {
-        ESP_LOGE(TAG,"missing parameter\n");
+        //ESP_LOGE(TAG,"missing parameter\n");
+        log_i("missing parameter\n");
         return;
     }
     if(err==2)
     {
-        ESP_LOGE(TAG,"wrong value\n");
+        //ESP_LOGE(TAG,"wrong value\n");
         return;
     }
-    ESP_LOGE(TAG,"wrong command\n");
+    //ESP_LOGE(TAG,"wrong command\n");
 }
 
 void ProcessStdin() {
@@ -223,7 +182,7 @@ void ProcessStdin() {
     int c = fgetc(stdin);
     if(c!= EOF) 
     {
-        ESP_LOGD(TAG,"%c",c);
+        //ESP_LOGD(TAG,"%c",c);
         if(c=='\n') 
         {
             cmd[cmdlen]=0;
@@ -245,28 +204,28 @@ void ProcessStdin() {
 void cmdSetTon(uint8_t* buf)
 {
     uint8_t t=buf[1];
-    solarPump.tOn=60000*t;
-    param.save("ton",t);
+    solarCtrl.tOn=60000*t;
+    NVS.setInt("ton",t);
 }
 
 void cmdSetToff(uint8_t* buf)
 {
     uint8_t t=buf[1];
-    solarPump.tOff=60000*t;
-    param.save("toff",t);
+    solarCtrl.tOff=60000*t;
+    NVS.setInt("toff",t);
 }
 
 void cmdSetDTACTPUMP(uint8_t* buf)
 {
     DT_ActPump=buf[1];
-    param.save("dtactpump",DT_ActPump);
+    NVS.setInt("dtactpump",DT_ActPump);
 
 }
 
 void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 {
-    ESP_LOGD(TAG,"cmd: %02x len: %d",cmd,len);
-    ESP_LOG_BUFFER_HEX_LEVEL(TAG,buf,len,ESP_LOG_DEBUG);
+    //ESP_LOGD(TAG,"cmd: %02x len: %d",cmd,len);
+    //ESP_LOG_BUFFER_HEX_LEVEL(TAG,buf,len,ESP_LOG_DEBUG);
     switch (cmd)
     {
         case CMD_STORE_CU_PARAM:
@@ -288,7 +247,7 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
             };
             break;
         case CMDREQUESTSTATUS:
-            bus485.SendStatus(solarPump.tOn/60000,solarPump.tOff/60000,DT_ActPump);
+            bus485.SendStatus(solarCtrl.tOn/60000,solarCtrl.tOff/60000,DT_ActPump);
             break;
         case CMDRESTART:
             esp_restart();
@@ -302,31 +261,18 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 
 void onTempChange(float f)
 {
-    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].getValue() > sensor[TANKTEMPSENSOR].getValue() + DT_ActPump);
+    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].value > sensor[TANKTEMPSENSOR].value + DT_ActPump);
 }
 
 void onSolarOutPin(bool b)
 {
-    digitalWrite(GPIO_J,(toggle1 || solarCtrl);
+    digitalWrite(GPIO_PUMP,(toggle1.state || solarCtrl.state));
 }
 
-bool onIdle()
-{
-    static uint32_t lastTempCheck=0;
-    uint32_t m=millis();
-    if((millis() - lastTempCheck) > Tread*1000) {
-        readTemperatures();
-        lastTempCheck=m;
-    } 
-    solarCtrl.run();
-    bus485.Rx();
-    ProcessStdin();
-    return false;
-}
 
 
 void searchSensors() {
-    #define MaxDevs 3
+
     uint64_t addr[MaxDevs];
     uint8_t devices=ds.search(addr, MaxDevs);
 	for (uint8_t i = 0; i < devices; i += 1) {
@@ -343,7 +289,7 @@ void readTemperatures()
     float v;
     for(byte i = 0; i < MaxDevs; i++){
         a=sensor[i].addr;
-        uint8_t err = ds.getTemp(&a, &v);
+        uint8_t err = ds.getTemp(a, v);
         if(err){
             const char *errt[] = {"", "CRC", "BAD","DC","DRV"};
             Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
@@ -355,21 +301,36 @@ void readTemperatures()
 }
 
 
+bool onIdle()
+{
+    static uint32_t lastTempCheck=0;
+    uint32_t m=millis();
+    if((millis() - lastTempCheck) > Tread*1000) {
+        readTemperatures();
+        lastTempCheck=m;
+    } 
+    solarCtrl.run();
+    bus485.Rx();
+    ProcessStdin();
+    return false;
+}
+
+
 void app_main(void)
 {
     NVS.begin();
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
-    esp_log_level_set("*", ESP_LOG_INFO);
+    //esp_log_level_set("*", ESP_LOG_INFO);
     //esp_log_level_set("Switch", ESP_LOG_DEBUG);
-    esp_log_level_set("main", ESP_LOG_INFO);
+    //esp_log_level_set("main", ESP_LOG_INFO);
     searchSensors();
-    param.Init();
+
 
     bus485.cbElaboraComando=&ProcessBusCommand;
 
 
-    sensor[SOLARPANELTEMPSENSOR].begin(NVS.getInt("sptsadd"),onTempChange,[](float f) { bus485.SendPanelTemp(f); });
-    sensor[TANKTEMPSENSOR].begin(NVS.getInt("tatsadd"),onTempChange,[](float f) { bus485.SendTankTemp(f); });
+    sensor[SOLARPANELTEMPSENSOR].begin(NVS.getInt("psadd"),onTempChange,[](float f) { bus485.SendPanelTemp(f); });
+    sensor[TANKTEMPSENSOR].begin(NVS.getInt("tsadd"),onTempChange,[](float f) { bus485.SendTankTemp(f); });
 
 
     solarCtrl.begin(NVS.getInt("ton"),NVS.getInt("toff"),onSolarOutPin,false);
@@ -378,14 +339,13 @@ void app_main(void)
 
     btnDebounce.begin([]() {toggle1.toggle();});
 
-    toggle1.begin(onSolarOutPin);
+    toggle1.begin(&onSolarOutPin);
     attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), [](){btnDebounce.set(digitalRead(GPIO_BUTTON));}, CHANGE);
     
-    
-    param.load("dtactpump",&DT_ActPump);
-    Tread=NVS.getInt("tread",10)
+    DT_ActPump=NVS.getInt("dtactpump",DT_ActPump);
+    Tread=NVS.getInt("tread",10);
     esp_register_freertos_idle_hook(onIdle);
 
-    ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
+    //ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
 
 }
