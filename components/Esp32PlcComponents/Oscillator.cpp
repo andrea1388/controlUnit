@@ -2,20 +2,20 @@
 #include "Oscillator.hpp"
 void Oscillator::run()
 {
-    uint32_t m=millis();
+    unsigned long m=millis();
     if(state)
     {
         if(!enabled)
         {
             state=false;
-            if(onChange) onChange(state);
+            changed=true;
         }
         else
         {
             if((m-tLastChange)>tOn)
             {
                 state=false;
-                if(onChange) onChange(state);  
+                changed=true;
                 tLastChange=m;             
             }
         }
@@ -25,17 +25,21 @@ void Oscillator::run()
         if((m-tLastChange)>tOff)
         {
             state=true;
-            if(onChange) onChange(state);  
+            changed=true;
             tLastChange=m;             
         }
     }
-    
+    Base::run();    
 }
 
-void Oscillator::begin(uint32_t _tOn, uint32_t _tOff, void (*_onChange)(bool state), bool _enabled)
+void Oscillator::begin(uint32_t _tOn, uint32_t _tOff, void (*_onChange)(), bool _enabled)
 {
     tOn=_tOn;
     tOff=_tOff;
-    onChange=_onChange;
     enabled=_enabled;
+    Base::begin(_onChange);
+}
+
+Oscillator::Oscillator(const String& n) : Base(n)
+{
 }

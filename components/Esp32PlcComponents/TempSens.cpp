@@ -1,28 +1,23 @@
 #include "Arduino.h"
-#include "TempSens.h"
+#include "TempSens.hpp"
+
+TempSens::TempSens(const String &n) : Base(n) 
+{
+}
 
 void TempSens::setValue(float v)
 {
     if(v!=value) 
     {
-        bool s=false;
-        if( ((lastSignaledTime-millis())*1000>minTimeBetweenSignal) && (abs(v-value)>minTempGapBetweenSignal)) s=true;
+        changed=true;
         value=v;
-        
-        if(onChange) onChange(value);
-        if(s) if(onSignal) onSignal(value);
-
     }
 
 }
 
-void TempSens::begin(uint64_t _addr, void (*_onChange)(float t), void (*_onSignal)(float t), uint16_t _minTimeBetweenSignal, uint8_t _minTempGapBetweenSignal)
+void TempSens::begin(uint64_t _addr, void (*_onChange)())
 {
     addr=_addr;
-    minTimeBetweenSignal=_minTempGapBetweenSignal;
-    minTempGapBetweenSignal=_minTempGapBetweenSignal;
-    onChange=_onChange;
-    onSignal=_onSignal;
-
-
+    Base::begin(_onChange);
 }
+

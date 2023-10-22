@@ -8,12 +8,12 @@
 #include "Debounce.hpp"
 #include "Toggle.hpp"
 #include "Oscillator.hpp"
-//#include "esp_log.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_freertos_hooks.h"
 #include <stdio.h>
-#include "TempSens.h"
+#include "TempSens.hpp"
 // #include "esp_timer.h"
 #include "driver/uart.h"
 #include "Proto485.h"
@@ -40,7 +40,7 @@
 #define SOLARPANELTEMPSENSOR 0
 #define TANKTEMPSENSOR 1
 #define FPTEMPSENSOR 2
-#define MaxDevs 3
+#define MaxDevs 2
 
 #pragma endregion
 
@@ -58,19 +58,25 @@ OneWire32 ds(GPIO_SENSOR, 0, 1, 0);
 static const char *TAG = "main";
 Proto485 bus485(UART_NUM_2, UARTTX, UARTRX, UARTRTS, UARTCTS);
 typedef unsigned char byte;
-Debounce btnDebounce;
-Toggle toggle1;
-Oscillator solarCtrl,ledCtrl;
-TempSens sensor[MaxDevs];
+
+Debounce btnDebounce("debounce");
+Toggle toggle1("toggle");
+Oscillator solarCtrl("solarctrl"),ledCtrl("ledctrl");
+TempSens panelTs("panelTs"),tankTs("tankTs");
+std::array<TempSens*, 2> sensor{{&panelTs,&tankTs}};
+std::array<Base*, 4> plcobj{{&btnDebounce,&toggle1,&solarCtrl,&ledCtrl}};
+
 #pragma endregion
 
 
 
 void onNewCommand(char *s)
 {
+
+
     uint8_t err=0;
     const char *delim=" ";
-    //ESP_LOGI(TAG,"New command=%s",s);
+    ESP_LOGI(TAG,"New command=%s",s);
     char *token = strtok(s, delim);
     if(!token) return;
 
@@ -259,12 +265,12 @@ void ProcessBusCommand(uint8_t cmd,uint8_t *buf,uint8_t len)
 
 }
 
-void onTempChange(float f)
+void onTempChange()
 {
-    solarCtrl.enabled=(sensor[SOLARPANELTEMPSENSOR].value > sensor[TANKTEMPSENSOR].value + DT_ActPump);
+    solarCtrl.enabled=(panelTs.value > tankTs.value + DT_ActPump);
 }
 
-void onSolarOutPin(bool b)
+void onSolarOutPin()
 {
     digitalWrite(GPIO_PUMP,(toggle1.state || solarCtrl.state));
 }
@@ -276,8 +282,10 @@ void searchSensors() {
     uint64_t addr[MaxDevs];
     uint8_t devices=ds.search(addr, MaxDevs);
 	for (uint8_t i = 0; i < devices; i += 1) {
-		Serial.printf("Sensor %d: 0x%llx,\n", i, addr[i]);
-		//char buf[20]; snprintf( buf, 20, "0x%llx,", addr[i] ); Serial.println(buf);
+		//Serial.printf("Sensor %d: 0x%llx\n", i, addr[i]);
+		ESP_LOGI(TAG,"Sensor %d: 0x%llx\n", i, addr[i]);
+		
+        //char buf[20]; snprintf( buf, 20, "0x%llx,", addr[i] ); Serial.println(buf);
 	}
 }
 
@@ -288,14 +296,16 @@ void readTemperatures()
     uint64_t a;
     float v;
     for(byte i = 0; i < MaxDevs; i++){
-        a=sensor[i].addr;
+        a=sensor[i]->addr;
         uint8_t err = ds.getTemp(a, v);
         if(err){
             const char *errt[] = {"", "CRC", "BAD","DC","DRV"};
-            Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
+            ESP_LOGE(TAG,"Sensor %d: 0x%llx %s\n", i, a,errt[err]);
+            //Serial.print(i); Serial.print(": "); Serial.println(errt[err]);
         }else{
-            sensor[i].setValue(v);
-            Serial.print(i); Serial.print(": "); Serial.println(v);
+            sensor[i]->setValue(v);
+            //Serial.print(i); Serial.print(": "); Serial.println(v);
+            ESP_LOGI(TAG,"Sensor %d: 0x%llx %f\n", i, a,v);
         }
     }
 }
@@ -309,7 +319,9 @@ bool onIdle()
         readTemperatures();
         lastTempCheck=m;
     } 
-    solarCtrl.run();
+    std::for_each(plcobj.cbegin(), plcobj.cend(), [](Base* x) {x->run();});
+    //for()
+    //    plcobj[i].run();
     bus485.Rx();
     ProcessStdin();
     return false;
@@ -318,34 +330,43 @@ bool onIdle()
 
 void app_main(void)
 {
-    NVS.begin();
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
-    //esp_log_level_set("*", ESP_LOG_INFO);
-    //esp_log_level_set("Switch", ESP_LOG_DEBUG);
-    //esp_log_level_set("main", ESP_LOG_INFO);
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("Plc", ESP_LOG_DEBUG);
+    esp_log_level_set("main", ESP_LOG_INFO);
+    ESP_LOGI(TAG,"Starting...");
+    NVS.begin();
+    //Serial.begin(115200);
     searchSensors();
 
 
     bus485.cbElaboraComando=&ProcessBusCommand;
 
 
-    sensor[SOLARPANELTEMPSENSOR].begin(NVS.getInt("psadd"),onTempChange,[](float f) { bus485.SendPanelTemp(f); });
-    sensor[TANKTEMPSENSOR].begin(NVS.getInt("tsadd"),onTempChange,[](float f) { bus485.SendTankTemp(f); });
+    panelTs.begin(NVS.getInt("psadd"),onTempChange);
+    tankTs.begin(NVS.getInt("tsadd"),onTempChange);
 
 
     solarCtrl.begin(NVS.getInt("ton"),NVS.getInt("toff"),onSolarOutPin,false);
 
-    ledCtrl.begin(1000,1000,[](bool b) { digitalWrite(GPIO_LED,b); },true);
+    ledCtrl.begin(1000,1000,[]() { digitalWrite(GPIO_LED,ledCtrl.state); ESP_LOGI(TAG,"led=%d",ledCtrl.state); },true);
 
-    btnDebounce.begin([]() {toggle1.toggle();});
+    btnDebounce.begin([]() {toggle1.toggle();},500);
 
     toggle1.begin(&onSolarOutPin);
+
+    pinMode(GPIO_BUTTON, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), [](){btnDebounce.set(digitalRead(GPIO_BUTTON));}, CHANGE);
     
     DT_ActPump=NVS.getInt("dtactpump",DT_ActPump);
     Tread=NVS.getInt("tread",10);
-    esp_register_freertos_idle_hook(onIdle);
+    //esp_register_freertos_idle_hook(onIdle);
 
-    //ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
+    ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
+    for(;;)
+    {
+        onIdle();
+        vTaskDelay(1);
+    }
 
 }

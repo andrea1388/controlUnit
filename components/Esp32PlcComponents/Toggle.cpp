@@ -1,10 +1,14 @@
-#include "Toggle.hpp" 
+#include "Toggle.hpp"
+Toggle::Toggle(const String &n) : Base(n)
+{
+}
 void Toggle::toggle()
 {
     state=!state;
-    if(onChange) (*onChange)(state);
+    changed=true;   
+     
 }
-void Toggle::begin(void (*_onChange)(bool state))
+void Toggle::begin(void (*_onChange)())
 {
     onChange=_onChange;
 }
