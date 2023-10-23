@@ -8,7 +8,7 @@ class Base
 protected:
     String pName;
     bool changed=false;
-    char *tag="plc";
+    
 public:
     Base(const String&);
     void begin(void (*onChange)());

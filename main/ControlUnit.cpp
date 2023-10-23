@@ -26,7 +26,7 @@
 // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html
 #define GPIO_SENSOR GPIO_NUM_23
 #define GPIO_PUMP GPIO_NUM_18
-#define GPIO_LED GPIO_NUM_22
+#define GPIO_LED GPIO_NUM_2
 #define GPIO_BUTTON GPIO_NUM_33
 #define GPIO_VALVE GPIO_NUM_34
 #define UARTTX GPIO_NUM_21
@@ -96,6 +96,17 @@ void onNewCommand(char *s)
                 DT_ActPump=j;
                 NVS.setInt("dtpump",DT_ActPump);
                 return;
+        }
+    }
+
+    if (strcmp(token,"log")==0)
+    {
+        char log[11];
+        token = strtok(NULL, delim);
+        if(token==NULL) err=1;
+        if(err==0) {
+            strncpy(log,token,10);
+            token = strtok(NULL, delim);
         }
     }
 
@@ -273,6 +284,19 @@ void onTempChange()
 void onSolarOutPin()
 {
     digitalWrite(GPIO_PUMP,(toggle1.state || solarCtrl.state));
+    if(toggle1.state)
+    {
+        ledCtrl.tOn=100;
+        ledCtrl.tOff=100;
+
+    }
+    else
+    {
+        ledCtrl.tOn=1000;
+        ledCtrl.tOff=1000;
+
+    }
+
 }
 
 
@@ -310,19 +334,27 @@ void readTemperatures()
     }
 }
 
-
+void readTempTask(void * pvParameters)
+{
+    for(;;)
+    {
+        readTemperatures();
+        vTaskDelay(Tread*1000);
+    }
+}
 bool onIdle()
 {
-    static uint32_t lastTempCheck=0;
+/*     static uint32_t lastTempCheck=0;
     uint32_t m=millis();
     if((millis() - lastTempCheck) > Tread*1000) {
-        readTemperatures();
+        
         lastTempCheck=m;
-    } 
+    }  */
     std::for_each(plcobj.cbegin(), plcobj.cend(), [](Base* x) {x->run();});
+    ledCtrl.run();
     //for()
     //    plcobj[i].run();
-    bus485.Rx();
+    //bus485.Rx();
     ProcessStdin();
     return false;
 }
@@ -332,7 +364,7 @@ void app_main(void)
 {
     //esp_log_level_set("ds18b20", ESP_LOG_DEBUG);
     esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("Plc", ESP_LOG_DEBUG);
+    esp_log_level_set("plc", ESP_LOG_INFO);
     esp_log_level_set("main", ESP_LOG_INFO);
     ESP_LOGI(TAG,"Starting...");
     NVS.begin();
@@ -356,16 +388,17 @@ void app_main(void)
     toggle1.begin(&onSolarOutPin);
 
     pinMode(GPIO_BUTTON, INPUT_PULLUP);
+    pinMode(GPIO_LED, OUTPUT);
     attachInterrupt(digitalPinToInterrupt(GPIO_BUTTON), [](){btnDebounce.set(digitalRead(GPIO_BUTTON));}, CHANGE);
     
     DT_ActPump=NVS.getInt("dtactpump",DT_ActPump);
     Tread=NVS.getInt("tread",10);
-    //esp_register_freertos_idle_hook(onIdle);
-
+    esp_register_freertos_idle_hook(onIdle);
+    xTaskCreate(readTempTask,"readTempTask",3000,NULL,1,NULL);
     ESP_LOGI(TAG,"Started. Tread=%u DT_ActPump=%u",Tread,DT_ActPump);
     for(;;)
     {
-        onIdle();
+        //onIdle();
         vTaskDelay(1);
     }
 

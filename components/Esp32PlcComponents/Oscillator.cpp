@@ -1,5 +1,8 @@
 #include "Arduino.h"
 #include "Oscillator.hpp"
+#include "esp_log.h"
+extern char *plctag;
+
 void Oscillator::run()
 {
     unsigned long m=millis();
@@ -30,6 +33,7 @@ void Oscillator::run()
         }
     }
     Base::run();    
+    ESP_LOGD(plctag,"Oscillator: state:%d tLastChange:%lu",state,tLastChange);
 }
 
 void Oscillator::begin(uint32_t _tOn, uint32_t _tOff, void (*_onChange)(), bool _enabled)
